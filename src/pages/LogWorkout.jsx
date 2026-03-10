@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
-import { Plus, X, Check, Trash2, ChevronDown, ChevronUp } from 'lucide-react'
-import { getExercises, createWorkout, addSet, addCardioEntry, deleteSet, deleteCardioEntry, getWorkout } from '../lib/db'
+import { Plus, X, Check, Trash2, ChevronDown, ChevronUp, Bookmark } from 'lucide-react'
+import { getExercises, createWorkout, addSet, addCardioEntry, deleteSet, deleteCardioEntry, getWorkout, getSavedLabels, saveLabel, removeLabel, getDistinctLabels } from '../lib/db'
 import { format } from 'date-fns'
 
 export default function LogWorkout() {
@@ -13,9 +13,28 @@ export default function LogWorkout() {
   const [showStrength, setShowStrength] = useState(true)
   const [loading, setLoading] = useState(false)
   const [msg, setMsg] = useState(null)
+  const [savedLabels, setSavedLabels] = useState([])
+  const [historyLabels, setHistoryLabels] = useState([])
+  const [showLabelDropdown, setShowLabelDropdown] = useState(false)
+  const [showLabelManager, setShowLabelManager] = useState(false)
+  const [newSavedLabel, setNewSavedLabel] = useState('')
+  const labelInputRef = useRef(null)
+  const dropdownRef = useRef(null)
 
   useEffect(() => {
     loadExercises()
+    loadLabels()
+  }, [])
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    function handleClickOutside(e) {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+        setShowLabelDropdown(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
   async function loadExercises() {
@@ -27,12 +46,29 @@ export default function LogWorkout() {
     }
   }
 
+  function loadLabels() {
+    setSavedLabels(getSavedLabels())
+    getDistinctLabels()
+      .then(labels => setHistoryLabels(labels))
+      .catch(err => console.error(err))
+  }
+
+  // Merge saved + history labels, deduplicated
+  const allLabels = [...new Set([...savedLabels, ...historyLabels])].sort((a, b) => a.localeCompare(b))
+  const filteredLabels = workoutName
+    ? allLabels.filter(l => l.toLowerCase().includes(workoutName.toLowerCase()) && l !== workoutName)
+    : allLabels
+
   async function startWorkout() {
     if (!workoutDate) return
     setLoading(true)
     try {
       const w = await createWorkout({ date: workoutDate, name: workoutName || null })
       setWorkout(w)
+      // Auto-save label to library for future use
+      if (workoutName.trim()) {
+        setSavedLabels(saveLabel(workoutName))
+      }
       flash('Workout started')
     } catch (err) {
       flash(err.message, true)
@@ -81,16 +117,116 @@ export default function LogWorkout() {
               onChange={e => setWorkoutDate(e.target.value)}
             />
           </div>
-          <div>
-            <label className="block text-xs font-medium mb-1" style={{ color: 'var(--color-text-muted)' }}>
-              Label <span style={{ color: 'var(--color-text-faint)' }}>(optional)</span>
-            </label>
+          <div ref={dropdownRef} className="relative">
+            <div className="flex items-center justify-between mb-1">
+              <label className="block text-xs font-medium" style={{ color: 'var(--color-text-muted)' }}>
+                Label <span style={{ color: 'var(--color-text-faint)' }}>(optional)</span>
+              </label>
+              <button
+                type="button"
+                className="flex items-center gap-1 text-xs font-medium px-1.5 py-0.5 rounded hover:opacity-80 transition-opacity"
+                style={{ color: 'var(--color-primary)' }}
+                onClick={() => setShowLabelManager(!showLabelManager)}
+              >
+                <Bookmark size={12} />
+                {showLabelManager ? 'Done' : 'Manage'}
+              </button>
+            </div>
             <input
+              ref={labelInputRef}
               className="input"
               placeholder='e.g. Push Day, CALI-1 Bench'
               value={workoutName}
-              onChange={e => setWorkoutName(e.target.value)}
+              onChange={e => {
+                setWorkoutName(e.target.value)
+                setShowLabelDropdown(true)
+              }}
+              onFocus={() => setShowLabelDropdown(true)}
+              autoComplete="off"
             />
+
+            {/* Autocomplete dropdown */}
+            {showLabelDropdown && filteredLabels.length > 0 && (
+              <div
+                className="absolute z-10 left-0 right-0 mt-1 rounded-lg overflow-hidden shadow-lg max-h-40 overflow-y-auto"
+                style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}
+              >
+                {filteredLabels.map(label => (
+                  <button
+                    key={label}
+                    type="button"
+                    className="w-full text-left px-3 py-2 text-sm hover:opacity-80 transition-colors flex items-center justify-between"
+                    style={{ borderBottom: '1px solid var(--color-border)' }}
+                    onClick={() => {
+                      setWorkoutName(label)
+                      setShowLabelDropdown(false)
+                    }}
+                  >
+                    <span>{label}</span>
+                    {savedLabels.includes(label) && (
+                      <Bookmark size={12} style={{ color: 'var(--color-primary)', fill: 'var(--color-primary)' }} />
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Label manager */}
+            {showLabelManager && (
+              <div className="mt-2 p-3 rounded-lg space-y-2" style={{ background: 'var(--color-surface-2)', border: '1px solid var(--color-border)' }}>
+                <div className="flex gap-2">
+                  <input
+                    className="input flex-1"
+                    placeholder="Add a saved label..."
+                    value={newSavedLabel}
+                    onChange={e => setNewSavedLabel(e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault()
+                        if (newSavedLabel.trim()) {
+                          setSavedLabels(saveLabel(newSavedLabel))
+                          setNewSavedLabel('')
+                        }
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-primary px-3"
+                    onClick={() => {
+                      if (newSavedLabel.trim()) {
+                        setSavedLabels(saveLabel(newSavedLabel))
+                        setNewSavedLabel('')
+                      }
+                    }}
+                  >
+                    <Plus size={14} />
+                  </button>
+                </div>
+                {savedLabels.length > 0 ? (
+                  <div className="flex flex-wrap gap-1.5">
+                    {savedLabels.map(label => (
+                      <span
+                        key={label}
+                        className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded-full font-medium"
+                        style={{ background: 'var(--color-primary-light)', color: 'var(--color-primary)' }}
+                      >
+                        {label}
+                        <button
+                          type="button"
+                          className="hover:opacity-70 ml-0.5"
+                          onClick={() => setSavedLabels(removeLabel(label))}
+                        >
+                          <X size={12} />
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs" style={{ color: 'var(--color-text-faint)' }}>No saved labels yet. Add labels you use often.</p>
+                )}
+              </div>
+            )}
           </div>
           <button className="btn btn-primary w-full" onClick={startWorkout} disabled={loading}>
             <Plus size={16} /> Start Workout

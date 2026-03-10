@@ -169,3 +169,42 @@ export async function getExerciseHistory(exerciseId, limit = 50) {
   if (error) throw error
   return data
 }
+
+// ─── Labels ──────────────────────────────────────────────
+
+const LABELS_KEY = 'exercise-tracker-saved-labels'
+
+export function getSavedLabels() {
+  try {
+    const raw = localStorage.getItem(LABELS_KEY)
+    return raw ? JSON.parse(raw) : []
+  } catch {
+    return []
+  }
+}
+
+export function saveLabel(label) {
+  const labels = getSavedLabels()
+  const trimmed = label.trim()
+  if (!trimmed || labels.includes(trimmed)) return labels
+  const updated = [...labels, trimmed].sort((a, b) => a.localeCompare(b))
+  localStorage.setItem(LABELS_KEY, JSON.stringify(updated))
+  return updated
+}
+
+export function removeLabel(label) {
+  const labels = getSavedLabels().filter(l => l !== label)
+  localStorage.setItem(LABELS_KEY, JSON.stringify(labels))
+  return labels
+}
+
+export async function getDistinctLabels() {
+  const { data, error } = await supabase
+    .from('workouts')
+    .select('name')
+    .not('name', 'is', null)
+    .order('name')
+  if (error) throw error
+  const unique = [...new Set(data.map(w => w.name).filter(Boolean))]
+  return unique
+}
